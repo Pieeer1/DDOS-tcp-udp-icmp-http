@@ -1,6 +1,15 @@
 # create as executable
 # chmod +x iptable_defense.sh
 
+# block invalid packets
+iptables -t mangle -A PREROUTING -m conntrack --ctstate INVALID -j DROP
+
+# block tcp packets that are not syn
+iptables -t mangle -A PREROUTING -p tcp ! --syn -m conntrack --ctstate NEW -j DROP
+
+# block
+iptables -t mangle -A PREROUTING -p tcp -m conntrack --ctstate NEW -m tcpmss ! --mss 536:65535 -j DROP
+
 # block fake tcp flag packets
 iptables -t mangle -A PREROUTING -p tcp --tcp-flags FIN,SYN FIN,SYN -j DROP
 iptables -t mangle -A PREROUTING -p tcp --tpc-flags SYN,RST SYN,RST -j DROP
@@ -20,3 +29,27 @@ iptables -t mangle -A PREROUTING -s 10.0.0.0/8 -j DROP
 iptables -t mangle -A PREROUTING -s 0.0.0.0/8 -j DROP
 iptables -t mangle -A PREROUTING -s 240.0.0.0/5 -j DROP
 iptables -t mangle -A PREROUTING -s 127.0.0.0/8 ! -i lo -j DROP
+
+# block fragmented packets
+iptables -t mangle -A PREROUTING -f -j DROP 
+
+# limiting connections per source
+# limit of 100 connections, rejects connections from hosts with more than 100 established connections
+iptables -A INPUT -p tcp -m connlimit --connlimit-above 100 -j REJECT --reject-with tcp-reset
+
+# limit new TCP connections that a client can make per second
+iptables -A INPUT -p tcp -m conntrack --ctstate NEW -m limit --limit 60/s --limit-burst 20 -j ACCEPT
+iptables -A INPUT -p tcp -m conntrack --ctstate NEW -j DROP
+
+# limit rst packets
+iptables -A INPUT -p tcp --tcp-flags RST RST -m limit --limit 2/s --limit-burst 2 -j ACCEPT
+iptables -A INPUT -p tcp --tcp-flags RST RST -j DROP
+
+# block port scans
+iptables -N port-scanning
+iptables -A port-scanning -p tcp --tcp-flags SYN,ACK,FIN,RST RST -m limit --limit 1/s --limit-burst 2 -j RETURN
+iptables -A port-scanning -j DROP
+
+# block SSH brute force
+iptables -A INPUT -p tcp --dport ssh -m conntrack --cstate NEW -m recent --set
+iptables -A INPUT -p tcp --dport ssh -m conntrack --ctstate NEW -m recent --update --seconds 60 --hitcount 10 -j DROP
