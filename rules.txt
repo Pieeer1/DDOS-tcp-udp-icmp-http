@@ -1,0 +1,11 @@
+alert tcp any any -> any any (msg: “SYN flood”; flags: S; flow: stateless; detection_filter: track by_dst, count 20, seconds 10; sid: 1)
+
+alert tcp any any -> any any (msg: “SYN flood”; flags: S; flow: stateless; detection_filter: track by_dst, count 20, seconds 10; priority: 10000; sid: 1) reject tcp any any ? any 80 (msg: “Reject”; flags: S; flow: stateless; detection_filter: track by_dst, count 100, seconds 60; priority: 100; sid: 2)
+reject tcp any any -> any 80 (msg: “Reject”; flags: S; flow: stateless; detection_filter: track by_dst, count 100, seconds 60; priority: 100; sid: 3)
+
+
+log udp any any -> any 1:1024 
+alert udp any any -> any any (msg: “UDP DDos”; flow: stateless; dectection_filter: track by_dst, count 1000, seconds 10; sid: 4;)
+reject udp any any -> any 1:1024 (msg: udp traffic is rejected”; sid: 5;)
+
+
