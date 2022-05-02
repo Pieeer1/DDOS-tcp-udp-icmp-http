@@ -1,18 +1,18 @@
 # create as executable
 # chmod +x iptable_defense.sh
 
-# block invalid packets
+# invalid packets are dropped
 iptables -t mangle -A PREROUTING -m conntrack --ctstate INVALID -j DROP
 
-# block tcp packets that are not syn
+# blocking tcp packets that do not belong to an established connection
 iptables -t mangle -A PREROUTING -p tcp ! --syn -m conntrack --ctstate NEW -j DROP
 
-# block
+# uncommon MSS values ranging from 536 to 65535 are blocked
 iptables -t mangle -A PREROUTING -p tcp -m conntrack --ctstate NEW -m tcpmss ! --mss 536:65535 -j DROP
 
 # block fake tcp flag packets
 iptables -t mangle -A PREROUTING -p tcp --tcp-flags FIN,SYN FIN,SYN -j DROP
-iptables -t mangle -A PREROUTING -p tcp --tpc-flags SYN,RST SYN,RST -j DROP
+iptables -t mangle -A PREROUTING -p tcp --tcp-flags SYN,RST SYN,RST -j DROP
 iptables -t mangle -A PREROUTING -p tcp --tcp-flags FIN,RST FIN,RST -j DROP
 iptables -t mangle -A PREROUTING -p tcp --tcp-flags FIN,ACK FIN -j DROP
 iptables -t mangle -A PREROUTING -p tcp --tcp-flags ACK,URG URG -j DROP
@@ -30,26 +30,28 @@ iptables -t mangle -A PREROUTING -s 0.0.0.0/8 -j DROP
 iptables -t mangle -A PREROUTING -s 240.0.0.0/5 -j DROP
 iptables -t mangle -A PREROUTING -s 127.0.0.0/8 ! -i lo -j DROP
 
-# block fragmented packets
-iptables -t mangle -A PREROUTING -f -j DROP 
+# prevents ping flood attacks by blocking icmp packet entirely
+iptables -t mangle -A PREROUTING -p icmp -j DROP
 
-# limiting connections per source
-# limit of 100 connections, rejects connections from hosts with more than 100 established connections
+# rejecting connections from hosts with more than 100 established connections
 iptables -A INPUT -p tcp -m connlimit --connlimit-above 100 -j REJECT --reject-with tcp-reset
 
-# limit new TCP connections that a client can make per second
-iptables -A INPUT -p tcp -m conntrack --ctstate NEW -m limit --limit 60/s --limit-burst 20 -j ACCEPT
+# limits new tcp connections a client can establish per sec
+iptables -A INPUT -p tcp -m conntrack --ctstate NEW -m limit --limit 60/s --limit-burst 20 -j ACCEPT 
 iptables -A INPUT -p tcp -m conntrack --ctstate NEW -j DROP
 
-# limit rst packets
-iptables -A INPUT -p tcp --tcp-flags RST RST -m limit --limit 2/s --limit-burst 2 -j ACCEPT
+# blocks fragmented packets, mitigates UDP fragmentation flood
+iptables -t mangle -A PREROUTING -f -j DROP
+
+# limits incoming TCP RST packets, mitigates TCP RST flood attacks
+iptables -A INPUT -p tcp --tcp-flags RST RST -m limit --limit 2/s --limit-burst 2 -j ACCEPT 
 iptables -A INPUT -p tcp --tcp-flags RST RST -j DROP
 
-# block port scans
-iptables -N port-scanning
-iptables -A port-scanning -p tcp --tcp-flags SYN,ACK,FIN,RST RST -m limit --limit 1/s --limit-burst 2 -j RETURN
-iptables -A port-scanning -j DROP
-
-# block SSH brute force
-iptables -A INPUT -p tcp --dport ssh -m conntrack --cstate NEW -m recent --set
+# tracking the amount of connections made to the SSH port
+iptables -A INPUT -p tcp --dport ssh -m conntrack --ctstate NEW -m recent --set 
 iptables -A INPUT -p tcp --dport ssh -m conntrack --ctstate NEW -m recent --update --seconds 60 --hitcount 10 -j DROP
+
+# blocking port scanning from outside sources
+iptables -N port-scanning
+iptables -A port-scanning -p tcp --tcp-flags SYN,ACK,FIN,RST RST -m limit --limit 1/s --limit-burst 2 -j RETURN 
+iptables -A port-scanning -j DROP
